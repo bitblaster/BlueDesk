@@ -1,0 +1,32 @@
+[Unit]
+Description=BlueDesk — sit/stand desk timer over BLE
+# Start after the graphical session is ready (D-Bus session available).
+# graphical-session.target is the right anchor for user services that
+# depend on the GUI session (KDE/Plasma here).
+After=graphical-session.target bluetooth.target
+PartOf=graphical-session.target
+Requires=graphical-session.target
+
+# Limit restart frequency to avoid crash loops.
+# These two keys belong in [Unit], NOT in [Service].
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+
+# IMPORTANT: adjust these two paths to your setup.
+WorkingDirectory=~/Arduino/ESP32_FlexiSpot
+ExecStart=~/git/BlueDesk/.venv/bin/python ~/git/BlueDesk/bluedesk_client.py
+
+# Auto-restart on crash
+Restart=always
+RestartSec=5
+
+# Output -> journal (visible with: journalctl --user -u bluedesk)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+# Bound to graphical-session.target so it starts/stops with the GUI session
+WantedBy=graphical-session.target
