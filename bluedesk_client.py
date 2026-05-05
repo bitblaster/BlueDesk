@@ -22,7 +22,7 @@ from dbus_fast import BusType
 
 # --- CONFIGURATION ---
 DEVICE_ADDRESS   = "F0:F5:BD:FC:09:96"
-DEVICE_NAME      = "BlueDesk"
+DEVICE_NAME      = "BlueDesk"             # for logs only, not used for discovery
 
 SERVICE_UUID    = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 CHAR_CMD_UUID   = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
@@ -58,7 +58,8 @@ DISCONNECT_TIMEOUT = 5.0
 SCAN_BACKOFF_SEC = [3, 10, 30, 60, 120]
 
 # Path of the persistent state file (survives script restarts).
-# We store: next preset to click, timestamp of the last click.
+# We store: next preset to click, timestamp of the last click, and the
+# predicted next-switch time used by the desktop widget.
 STATE_DIR  = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "bluedesk"
 STATE_FILE = STATE_DIR / "state.json"
 
@@ -79,11 +80,16 @@ class TimerState:
       - next_preset:    which preset to click on the next trigger
       - last_seen_mono: monotonic time of last ESP connection (in-memory only,
                         used for post-absence reset within a single run)
+      - _was_active:    last tick activity flag, for break-end edge detection
 
-    Persisted on disk (survives script restarts):
-      - next_preset:     so we know whether SIT or STAND is next at startup
-      - last_click_unix: UNIX timestamp of the last actual click, used to
-                         estimate accumulated time at startup
+    Persisted on disk in state.json (survives script restarts):
+      - next_preset:        so we know whether SIT or STAND is next at startup
+      - next_preset_label:  human-readable label, for the desktop widget
+      - last_click_unix:    UNIX timestamp of the last actual click; used at
+                            startup to estimate active_seconds
+      - next_switch_unix:   predicted UNIX time of the next preset switch,
+                            assuming the user stays active. The desktop widget
+                            reads this and computes "time remaining".
     """
 
     def __init__(self):
@@ -91,16 +97,26 @@ class TimerState:
         self.next_preset = BTN_PRESET_STAND
         self.last_seen_mono = None
         self.last_click_unix = None       # None = never clicked
+        self._was_active = True           # last tick activity, for edge detection
 
     # ---------- on-disk persistence ----------
 
     def save(self):
-        """Write state to disk. Call after every significant change."""
+        """Write the full state to disk. Call after every event that changes
+        either the persistent fields (next_preset, last_click_unix) or the
+        prediction (next_switch_unix)."""
         try:
             STATE_DIR.mkdir(parents=True, exist_ok=True)
+            preset_label = (
+                "SIT" if self.next_preset == BTN_PRESET_SIT else "STAND"
+            )
+            seconds_left = max(0, WORK_INTERVAL - self.active_seconds)
             data = {
                 "next_preset": self.next_preset,
+                "next_preset_label": preset_label,
                 "last_click_unix": self.last_click_unix,
+                "next_switch_unix": time.time() + seconds_left,
+                "updated_unix": time.time(),
             }
             # Atomic write: write to tmp file, then rename
             tmp = STATE_FILE.with_suffix(".tmp")
@@ -113,6 +129,7 @@ class TimerState:
         """Load state from disk if it exists, and compute initial active_seconds."""
         if not STATE_FILE.exists():
             logging.info("No previous state, starting from zero.")
+            self.save()
             return
 
         try:
@@ -147,6 +164,8 @@ class TimerState:
         except Exception as e:
             logging.warning(f"Error loading state: {e}. Starting from zero.")
 
+        self.save()
+
     # ---------- BLE events ----------
 
     def on_connected(self):
@@ -160,11 +179,14 @@ class TimerState:
                     f"(>{RESET_AFTER_ABSENCE_SEC}s): resetting timer."
                 )
                 self.active_seconds = 0
+                # Timer was reset -> the predicted switch time moved forward
+                self.save()
             else:
                 logging.info(
                     f"ESP back after {int(absence)}s: "
                     f"resuming from {self.active_seconds}s."
                 )
+                # No reset: prediction is unchanged, no need to rewrite state
         self.last_seen_mono = now
 
     def on_disconnected(self):
@@ -174,6 +196,16 @@ class TimerState:
     # ---------- timer cycle ----------
 
     def tick(self, is_active: bool):
+        # Detect break -> active edge: that's the moment when the predicted
+        # switch time has visibly slipped (by the duration of the break) and
+        # the widget must be refreshed. During the break itself the widget's
+        # countdown stays "stale" but is actually correct: real wall-clock
+        # time passing equals the time the deadline must slip by.
+        if is_active and not self._was_active:
+            self.save()
+
+        self._was_active = is_active
+
         if is_active:
             self.active_seconds += TICK_SEC
 
