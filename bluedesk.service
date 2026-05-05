@@ -16,7 +16,7 @@ StartLimitBurst=10
 Type=simple
 
 # IMPORTANT: adjust these two paths to your setup.
-WorkingDirectory=%h/Arduino/ESP32_FlexiSpot
+WorkingDirectory=%h/git/BlueDesk
 ExecStart=%h/git/BlueDesk/.venv/bin/python %h/git/BlueDesk/bluedesk_client.py
 
 # Auto-restart on crash

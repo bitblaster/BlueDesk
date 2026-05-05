@@ -28,8 +28,8 @@ SERVICE_UUID    = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 CHAR_CMD_UUID   = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 CHAR_STATE_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
-BTN_PRESET_SIT   = 0    # gpio0 -> "sit" preset
-BTN_PRESET_STAND = 1    # gpio1 -> "stand" preset
+BTN_PRESET_STAND = 0    # gpio0 -> "stand" preset
+BTN_PRESET_SIT   = 1    # gpio1 -> "sit" preset
 
 # Press duration: 300ms = short click on a preset button
 PRESS_DURATION_100MS = 3
